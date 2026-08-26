@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#09000f">
+<title>Soy Sigas Official</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:#08000e;min-height:100%;font-family:Arial,Helvetica,sans-serif}
+body{display:flex;justify-content:center;overflow-x:hidden}
+#app{position:relative;width:min(100vw,1024px);line-height:0}
+#interface{
+  display:block;width:100%;height:auto;
+  user-select:none;-webkit-user-drag:none;
+}
+.hotspot{
+  position:absolute;display:block;cursor:pointer;
+  background:transparent;border:0;padding:0;margin:0;
+  z-index:5;-webkit-tap-highlight-color:transparent;
+}
+.hotspot:focus{outline:none}
+.hotspot.locked{cursor:default;pointer-events:none}
+#yt{left:65.8%;top:50.7%;width:24.0%;height:4.8%}
+#ig{left:65.8%;top:59.3%;width:24.0%;height:4.8%}
+#fb{left:65.8%;top:67.8%;width:24.0%;height:4.8%}
+#wa{left:65.8%;top:76.1%;width:24.0%;height:4.8%}
+
+/* El progreso y el botón final se dibujan encima de la zona correspondiente
+   solo cuando cambia el estado; la imagen sigue siendo la interfaz de fondo. */
+#progressOverlay{
+  position:absolute;left:29%;top:84.0%;width:43%;height:4.2%;
+  display:flex;align-items:center;justify-content:center;
+  z-index:6;pointer-events:none;
+  font-weight:900;font-style:italic;
+  font-size:clamp(18px,4vw,42px);color:#fff;
+  text-shadow:0 0 8px #000,0 0 10px #8b00ff;
+  visibility:hidden;
+}
+#progressOverlay.show{visibility:visible}
+#continue{
+  position:absolute;left:26.5%;top:90.3%;width:47%;height:6.0%;
+  z-index:7;border:0;background:transparent;cursor:pointer;
+  display:none;
+}
+#continue.show{display:block}
+#continue:focus{outline:none}
+#continue.locked{cursor:not-allowed}
+
+#toast{
+  position:fixed;left:50%;bottom:18px;transform:translateX(-50%);
+  background:rgba(0,0,0,.9);border:1px solid #a800ff;color:#fff;
+  padding:10px 16px;border-radius:10px;font-size:14px;line-height:1.2;
+  z-index:50;display:none;text-align:center;max-width:90vw;
+}
+#toast.show{display:block}
+
+@media(max-width:600px){
+  #toast{font-size:13px;bottom:10px}
+}
+</style>
+</head>
+<body>
+<main id="app" aria-label="Soy Sigas Official">
+  <img id="interface" src="interfaz_soy_sigas.png" alt="Soy Sigas Official - Sígueme en mis redes">
+
+  <!-- Botones transparentes colocados exactamente sobre los botones de la imagen -->
+  <button id="yt" class="hotspot" aria-label="Seguir en YouTube"></button>
+  <button id="ig" class="hotspot locked" aria-label="Seguir en Instagram"></button>
+  <button id="fb" class="hotspot locked" aria-label="Seguir en Facebook"></button>
+  <button id="wa" class="hotspot locked" aria-label="Seguir en WhatsApp"></button>
+
+  <!-- Estado dinámico sin rediseñar la imagen base -->
+  <div id="progressOverlay" aria-live="polite"></div>
+
+  <!-- Se muestra solamente cuando las 4 redes están completadas -->
+  <button id="continue" aria-label="Continuar y generar enlace de descarga"></button>
+</main>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+/*
+ * ENLACE FINAL:
+ * Sustituye "#" por el enlace de descarga real.
+ */
+const DOWNLOAD_URL = "#";
+
+const WAIT_MS = 25000;
+const STORAGE_KEY = "soysigas_social_steps_v2";
+
+const networks = {
+  youtube: {
+    button: document.getElementById("yt"),
+    url: "https://youtube.com/@soysigasofficial?si=RoCdWuHVo7JHyV6b"
+  },
+  instagram: {
+    button: document.getElementById("ig"),
+    url: "https://www.instagram.com/soysigasofficial?igsi=MThtNnd6dXc2bjE4Yw=="
+  },
+  facebook: {
+    button: document.getElementById("fb"),
+    url: "https://www.facebook.com/profile.php?id=61593805138979"
+  },
+  whatsapp: {
+    button: document.getElementById("wa"),
+    url: "https://whatsapp.com/channel/0029Vb8Uc9fHgZWWuiZSzb1g"
+  }
+};
+
+const order = ["youtube","instagram","facebook","whatsapp"];
+
+/*
+ * Cada red es independiente:
+ * no existe bloqueo entre redes.
+ * "startedAt" solo representa una visita que está en curso.
+ */
+let state = loadState();
+
+function freshState(){
+  return {
+    youtube:   { completed:false, startedAt:null },
+    instagram: { completed:false, startedAt:null },
+    facebook:  { completed:false, startedAt:null },
+    whatsapp:  { completed:false, startedAt:null }
+  };
+}
+
+function loadState(){
+  try{
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    const base = freshState();
+
+    if(saved && typeof saved === "object"){
+      for(const key of order){
+        if(saved[key]){
+          base[key].completed = saved[key].completed === true;
+          base[key].startedAt = Number.isFinite(saved[key].startedAt)
+            ? saved[key].startedAt
+            : null;
+        }
+      }
+    }
+    return base;
+  }catch{
+    return freshState();
+  }
+}
+
+function saveState(){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function completedCount(){
+  return order.filter(k => state[k].completed).length;
+}
+
+function updateProgress(){
+  const count = completedCount();
+  const overlay = document.getElementById("progressOverlay");
+
+  /*
+   * La imagen ya contiene "1 PASO DE 4". Para no tapar la composición
+   * cuando aún no hay cambios, solo mostramos el estado dinámico desde 2/4.
+   */
+  if(count >= 2){
+    overlay.textContent = `${count} PASOS DE 4`;
+    overlay.classList.add("show");
+  }else{
+    overlay.classList.remove("show");
+  }
+
+  if(count === 4){
+    document.getElementById("continue").classList.add("show");
+  }else{
+    document.getElementById("continue").classList.remove("show");
+  }
+}
+
+function toast(message){
+  const el = document.getElementById("toast");
+  el.textContent = message;
+  el.classList.add("show");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => el.classList.remove("show"), 2400);
+}
+
+function setHotspotState(name){
+  const item = networks[name];
+  if(!item) return;
+
+  if(state[name].completed){
+    item.button.classList.add("locked");
+    return;
+  }
+
+  /*
+   * Todas las redes son independientes, por eso ninguna se bloquea
+   * por el estado de otra.
+   */
+  item.button.classList.remove("locked");
+}
+
+function completeNetwork(name){
+  if(state[name].completed || !state[name].startedAt) return;
+
+  const elapsed = Date.now() - state[name].startedAt;
+
+  if(elapsed < WAIT_MS){
+    return;
+  }
+
+  state[name].completed = true;
+  state[name].startedAt = null;
+  saveState();
+
+  setHotspotState(name);
+  updateProgress();
+}
+
+function cancelActiveVisit(name){
+  if(!state[name] || state[name].completed) return;
+
+  state[name].startedAt = null;
+  saveState();
+}
+
+/*
+ * Si el usuario vuelve a la página antes de 25 segundos,
+ * la tarea se cancela y tendrá que repetir esa red.
+ */
+function handleReturnToPage(){
+  const now = Date.now();
+
+  for(const name of order){
+    const started = state[name].startedAt;
+
+    if(!started || state[name].completed) continue;
+
+    const elapsed = now - started;
+
+    if(elapsed >= WAIT_MS){
+      completeNetwork(name);
+    }else{
+      cancelActiveVisit(name);
+    }
+  }
+}
+
+/*
+ * Cuando el usuario toca un enlace:
+ * - se abre la red en otra pestaña.
+ * - comienza el período de 25 s.
+ * - si regresa antes, se cancela.
+ * - si vuelve después de 25 s, se completa.
+ */
+function openNetwork(name){
+  const item = networks[name];
+  if(!item || state[name].completed) return;
+
+  const opened = window.open(item.url, "_blank", "noopener,noreferrer");
+
+  if(!opened){
+    /*
+     * Si el navegador bloquea la pestaña, no iniciamos el conteo.
+     */
+    toast("Permite abrir la red en una nueva pestaña.");
+    return;
+  }
+
+  state[name].startedAt = Date.now();
+  saveState();
+
+  /*
+   * El temporizador es interno: no se muestra ninguna cuenta regresiva.
+   */
+  setTimeout(() => {
+    if(
+      state[name].startedAt &&
+      !state[name].completed &&
+      Date.now() - state[name].startedAt >= WAIT_MS
+    ){
+      /*
+       * Si la página sigue oculta, se puede considerar que han pasado
+       * los 25 s. Si volvió antes, visibilitychange ya lo habría cancelado.
+       */
+      completeNetwork(name);
+    }
+  }, WAIT_MS + 100);
+}
+
+for(const name of order){
+  networks[name].button.addEventListener("click", () => openNetwork(name));
+}
+
+document.addEventListener("visibilitychange", () => {
+  if(document.visibilityState === "visible"){
+    handleReturnToPage();
+  }
+});
+
+window.addEventListener("pageshow", () => {
+  /*
+   * Si se regresa con navegación atrás, también comprobamos el estado.
+   */
+  handleReturnToPage();
+  updateProgress();
+});
+
+document.getElementById("continue").addEventListener("click", () => {
+  if(completedCount() !== 4) return;
+
+  if(!DOWNLOAD_URL || DOWNLOAD_URL === "#"){
+    toast("Coloca tu enlace de descarga en DOWNLOAD_URL.");
+    return;
+  }
+
+  window.location.href = DOWNLOAD_URL;
+});
+
+/*
+ * Restauración al abrir/recargar la página.
+ * Si una tarea estaba activa y ya pasaron 25 s, se completa.
+ * Si todavía no han pasado, queda pendiente y se cancela al volver
+ * a la página antes de terminar.
+ */
+for(const name of order){
+  setHotspotState(name);
+}
+
+updateProgress();
+
+(function restoreTimers(){
+  const now = Date.now();
+
+  for(const name of order){
+    const started = state[name].startedAt;
+
+    if(!started || state[name].completed) continue;
+
+    const elapsed = now - started;
+
+    if(elapsed >= WAIT_MS){
+      completeNetwork(name);
+    }
+  }
+
+  updateProgress();
+})();
+</script>
+</body>
+</html>
